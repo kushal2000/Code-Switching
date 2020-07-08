@@ -86,7 +86,7 @@ def get_dataset(data):
     dataset = TensorDataset(input_ids, attention_masks, token_type_ids, features, labels)
     return dataset
 
-def get_dataloader(dataset, batch_size = 32, train=True, split=True):
+def get_dataloader(dataset, batch_size = 8, train=True, split=True):
     if train:
         dataloader = DataLoader(
             dataset,
@@ -196,14 +196,12 @@ def evaluate(test_dataloader, nmodel):
         y_test = np.hstack((y_test, label_ids))
     avg_val_accuracy = total_eval_accuracy / len(test_dataloader)
     macro_f1, micro_f1 = f1_score(y_test, y_preds, average='weighted'), f1_score(y_test, y_preds, average='micro')
-    print("  Accuracy: {0:.4f}".format(avg_val_accuracy))
-    print("  Micro F1: {0:.4f}".format(micro_f1))
-    print("  Macro F1: {0:.4f}".format(macro_f1))
+    return avg_val_accuracy, micro_f1, macro_f1
 
-def train(training_dataloader, validation_dataloader, nmodel, epochs = 5):
+def train(training_dataloader, validation_dataloader, nmodel, epochs = 5, lr = 2e-5):
     total_steps = len(training_dataloader) * epochs
     optimizer = AdamW(nmodel.parameters(),
-                  lr = 2e-5, # args.learning_rate - default is 5e-5, 
+                  lr = lr, # args.learning_rate - default is 5e-5, 
                   eps = 1e-8 # args.adam_epsilon  - default is 1e-8.
                 )
     scheduler = get_linear_schedule_with_warmup(optimizer, 
@@ -265,10 +263,30 @@ def train(training_dataloader, validation_dataloader, nmodel, epochs = 5):
 
     return best_model, best_acc, best_micro, best_macro
 
-print(train_dataset)
-print(train_dataset[0][3].shape[0])
-D_in, hidden_size,num_labels, feature_dim = 768, 50, 3, train_dataset[0][3].shape[0]
-nmodel = BERT_Linear_Feature( hidden_size, D_in, num_labels, feature_dim).to(device)
 
-best_model, best_acc, best_micro, best_macro = train(training_dataloader, validation_dataloader, nmodel, epochs = 6)
-evaluate(test_dataloader, best_model)
+
+results = {}
+learning_rates = [1.5e-5, 2e-5, 2.5e-5]
+learning_rates = [2e-5]
+hidden_sizes = [25,50,100,200,500]
+for lr in learning_rates:
+    for size in hidden_sizes:
+        D_in, hidden_size,num_labels, feature_dim = 768, size, 3, train_dataset[0][3].shape[0]
+        nmodel = BERT_Linear_Feature( hidden_size, D_in, num_labels, feature_dim).to(device)
+        best_model, best_acc, best_micro, best_macro = train(training_dataloader, validation_dataloader, copy.deepcopy(nmodel), epochs = 10, lr=lr)
+        acc, micro, macro = evaluate(test_dataloader, best_model)   
+        print((acc,micro,macro))
+        results[(lr,size)]=(acc, micro, macro)
+
+f = open('results_dic.pkl', 'wb')
+pickle.dump(results, f)
+f.close()
+
+f = open('results.csv', 'w')
+f.write('lr,hidden_size,acc,micro, macro\n')
+for (lr,size) in results.keys():
+    acc, micro, macro = results[(lr,sizz)]
+    f.write(str(lr)+','+str(size)+','+str(acc)+','+str(micro)+','+str(macro)+',\n')
+
+f.close()
+
