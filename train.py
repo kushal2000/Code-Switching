@@ -29,9 +29,10 @@ np.random.seed(RANDOM_SEED)
 torch.manual_seed(RANDOM_SEED)
 random.seed(RANDOM_SEED)
 torch.cuda.manual_seed_all(RANDOM_SEED)
-device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
 n_gpu = torch.cuda.device_count()
-torch.cuda.get_device_name(0)
+print(n_gpu)
+print(torch.cuda.get_device_name(1))
 
 def run_feature_selection(signal_feature, feature_list, labels):
     feature_dict =  {}
@@ -102,19 +103,6 @@ def get_dataloader(dataset, batch_size = 8, train=True, split=True):
             num_workers=8
         )
     return dataloader
-
-filename = './Sentiment_Datasets/sentiment_dataset_23.pkl'
-f = open(filename, 'rb')
-train_data, validation_data, test_data = pickle.load(f)
-f.close()
-
-train_dataset = get_dataset(train_data)
-val_dataset = get_dataset(validation_data)
-test_dataset = get_dataset(test_data)
-
-training_dataloader = get_dataloader(train_dataset)
-validation_dataloader = get_dataloader(val_dataset, train=False)
-test_dataloader = get_dataloader(test_dataset, train = False)
 
 class Bert(nn.Module) :
     def __init__(self) :
@@ -263,30 +251,45 @@ def train(training_dataloader, validation_dataloader, nmodel, epochs = 5, lr = 2
 
     return best_model, best_acc, best_micro, best_macro
 
+if __name__=="__main__":
+    batch_size = int(sys.argv[1])
+    filenames = ['sentiment_dataset_23.pkl', 'sentiment_dataset_15.pkl', 'sentiment_dataset_9.pkl', 'sentiment_dataset_23_with_sel.pkl', 'sentiment_dataset_29_with_sel.pkl']
+    for fil in filenames:
+        folder = './Sentiment_Datasets/'
+        filename = folder + fil
+        f = open(filename, 'rb')
+        train_data, validation_data, test_data = pickle.load(f)
+        f.close()
 
+        train_dataset = get_dataset(train_data)
+        val_dataset = get_dataset(validation_data)
+        test_dataset = get_dataset(test_data)
 
-results = {}
-learning_rates = [1.5e-5, 2e-5, 2.5e-5]
-learning_rates = [2e-5]
-hidden_sizes = [25,50,100,200,500]
-for lr in learning_rates:
-    for size in hidden_sizes:
-        D_in, hidden_size,num_labels, feature_dim = 768, size, 3, train_dataset[0][3].shape[0]
-        nmodel = BERT_Linear_Feature( hidden_size, D_in, num_labels, feature_dim).to(device)
-        best_model, best_acc, best_micro, best_macro = train(training_dataloader, validation_dataloader, copy.deepcopy(nmodel), epochs = 10, lr=lr)
-        acc, micro, macro = evaluate(test_dataloader, best_model)   
-        print((acc,micro,macro))
-        results[(lr,size)]=(acc, micro, macro)
+        training_dataloader = get_dataloader(train_dataset, batch_size=batch_size)
+        validation_dataloader = get_dataloader(val_dataset, batch_size=batch_size, train=False)
+        test_dataloader = get_dataloader(test_dataset, batch_size = batch_size, train = False)
 
-f = open('results_dic.pkl', 'wb')
-pickle.dump(results, f)
-f.close()
+        results = {}
+        learning_rates = [1.5e-5, 2e-5, 2.5e-5]
+        learning_rates = [2e-5]
+        hidden_sizes = [25,50,100,200,500]
+        for lr in learning_rates:
+            for size in hidden_sizes:
+                D_in, hidden_size,num_labels, feature_dim = 768, size, 3, train_dataset[0][3].shape[0]
+                nmodel = BERT_Linear_Feature( hidden_size, D_in, num_labels, feature_dim).to(device)
+                best_model, best_acc, best_micro, best_macro = train(training_dataloader, validation_dataloader, copy.deepcopy(nmodel), epochs = 8, lr=lr)
+                acc, micro, macro = evaluate(test_dataloader, best_model)   
+                print((acc,micro,macro))
+                results[(lr,size)]=(acc, micro, macro)
 
-f = open('results.csv', 'w')
-f.write('lr,hidden_size,acc,micro, macro\n')
-for (lr,size) in results.keys():
-    acc, micro, macro = results[(lr,sizz)]
-    f.write(str(lr)+','+str(size)+','+str(acc)+','+str(micro)+','+str(macro)+',\n')
+        f = open(fil+'results_dic.pkl', 'wb')
+        pickle.dump(results, f)
+        f.close()
 
-f.close()
+        f = open(fil+'results.csv', 'w')
+        f.write('lr,hidden_size,acc,micro, macro\n')
+        for (lr,size) in results.keys():
+            acc, micro, macro = results[(lr,size)]
+            f.write(str(lr)+','+str(size)+','+str(acc)+','+str(micro)+','+str(macro)+',\n')
+        f.close()
 
