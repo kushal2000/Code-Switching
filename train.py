@@ -29,31 +29,25 @@ np.random.seed(RANDOM_SEED)
 torch.manual_seed(RANDOM_SEED)
 random.seed(RANDOM_SEED)
 torch.cuda.manual_seed_all(RANDOM_SEED)
-device = torch.device("cuda:1" if torch.cuda.is_available() else "cpu")
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 n_gpu = torch.cuda.device_count()
 print(n_gpu)
 print(torch.cuda.get_device_name(1))
 
-def run_feature_selection(signal_feature, feature_list, labels):
-    feature_dict =  {}
-    for j, i in enumerate(feature_list):
-        feature_dict[i]=j
-    results = {}
-    # BORUTA
-    rf = RandomForestClassifier(n_jobs=-1, class_weight='balanced', max_depth=5)
-    feat_selector = BorutaPy(rf, n_estimators='auto', verbose=1, random_state=1)
-    feat_selector.fit(signal_feature, labels)
-    df = pd.DataFrame(np.array([feature_list, feat_selector.support_, feat_selector.ranking_]).T, columns=['feature', 'T/F', 'Rank'])
-    print(df.sort_values(by=['Rank']))
-    print('------ BORUTA ------')
-    return feat_selector
+def normalize(x, m, s): return (x-m)/s
+
+def conv_np(data):
+    blank = np.zeros((len(data), 23))
+    for i in range(len(data)):
+        blank[i] = np.asarray([float(f) for f in data[i]])
+    return blank
 
 def tokenize(sentences, use_type_tokens = True, padding = True):
     tokenizer = BertTokenizer.from_pretrained('bert-base-multilingual-cased')
     input_ids = []
     attention_masks = []
     token_type_ids = []
-    max_len = 512
+    max_len = 128
     for sent in sentences:
         encoded_dict = tokenizer.encode_plus(sent,
                                                 add_special_tokens=True,
@@ -73,10 +67,7 @@ def tokenize(sentences, use_type_tokens = True, padding = True):
     if use_type_tokens :
         token_type_ids = torch.cat(token_type_ids, dim=0)
 
-    
-    #TODO: Pass dictionary instead of tuple
     if use_type_tokens :
-        # print("input ids: {} attention_masks: {} token_type_ids: {}".format(input_ids.shape, attention_masks.shape, token_type_ids.shape))
         return (input_ids, attention_masks, token_type_ids)
 
 def get_dataset(data):
@@ -87,7 +78,7 @@ def get_dataset(data):
     dataset = TensorDataset(input_ids, attention_masks, token_type_ids, features, labels)
     return dataset
 
-def get_dataloader(dataset, batch_size = 8, train=True, split=True):
+def get_dataloader(dataset, batch_size = 32, train=True, split=True):
     if train:
         dataloader = DataLoader(
             dataset,
@@ -104,19 +95,10 @@ def get_dataloader(dataset, batch_size = 8, train=True, split=True):
         )
     return dataloader
 
-class Bert(nn.Module) :
-    def __init__(self) :
-        super(Bert, self).__init__()
-        self.model = BertModel.from_pretrained('bert-base-multilingual-cased',  output_hidden_states = True)
-    def forward(self, input_ids, attn_masks, tokens):
-        outputs = self.model(input_ids, token_type_ids=tokens, attention_mask=attn_masks)
-        outputs = outputs[1]
-        return outputs
-
 class BERT_Linear(torch.nn.Module):
     def __init__(self, D_in, num_labels, feature_dim):
         super(BERT_Linear, self).__init__()
-        self.embeddings = Bert()
+        self.embeddings = BertModel.from_pretrained('bert-base-multilingual-cased',  output_hidden_states = True)
         self.linear1 = nn.Linear(D_in, num_labels, bias = True)
 
     def forward(self, x, x_feature, x_mask, tokens):
@@ -125,29 +107,19 @@ class BERT_Linear(torch.nn.Module):
         return y_pred
 
 class BERT_Linear_Feature(torch.nn.Module):
-    def __init__(self, hidden_size, D_in, num_labels, feature_dim):
+    def __init__(self, D_in, num_labels, feature_dim):
         super(BERT_Linear_Feature, self).__init__()
-        self.embeddings = Bert()
-        self.linear1 = nn.Linear(D_in, hidden_size, bias = True)
-        self.linear2 = nn.Linear(hidden_size+feature_dim, num_labels, bias = True)
-        # self.linear3 = nn.Linear(feature_dim, reduced_size, bias = True)
-        self.fc1 = nn.Linear(feature_dim, feature_dim, bias = True)
-        self.fc2 = nn.Linear(feature_dim, feature_dim, bias = True)
-        # self.sigmoid = nn.Sigmoid()
-        # self.dropout = nn.Dropout(0.1)
+        self.embeddings = BertModel.from_pretrained('bert-base-multilingual-cased',  output_hidden_states = True)
+        self.linear = nn.Linear(D_in+feature_dim, num_labels, bias = True)
+        self.fc = nn.Linear(feature_dim, feature_dim, bias = True)
+        self.dropout = nn.Dropout(0.25)
 
     def forward(self, x, x_feature, x_mask, token):
-        # hidden_states = self.embeddings(x, x_mask)
-        # embed = torch.cat([hidden_states, x_feature.float()], 1)
-        embeddings = self.embeddings(x,x_mask, token)
-        hidden_states = self.linear1(embeddings)
-        feat = F.relu(self.fc1(x_feature.float()))
-        feat = F.relu(self.fc2(feat))
-        # reduced = self.linear3(x_feature.float())
-        # hidden_states = self.dropout(hidden_states)
-        hidden_states = F.relu(hidden_states)
-        embed = torch.cat([hidden_states, feat], 1)
-        y_pred = (self.linear2(embed))
+        embeddings = self.embeddings(x,x_mask, token)[1]
+        feat = F.relu(self.fc(x_feature.float()))
+        feat = self.dropout(feat)
+        embed = torch.cat([embeddings, feat], 1)
+        y_pred = (self.linear(embed))
         return y_pred
 
 def flat_accuracy(preds, labels):
@@ -186,13 +158,16 @@ def evaluate(test_dataloader, nmodel):
     macro_f1, micro_f1 = f1_score(y_test, y_preds, average='weighted'), f1_score(y_test, y_preds, average='micro')
     return avg_val_accuracy, micro_f1, macro_f1
 
-def train(training_dataloader, validation_dataloader, nmodel, epochs = 5, lr = 2e-5):
+def train(training_dataloader, validation_dataloader, nmodel, epochs = 5, lr1=2e-5, lr2=1e-4):
     total_steps = len(training_dataloader) * epochs
-    optimizer = AdamW(nmodel.parameters(),
-                  lr = lr, # args.learning_rate - default is 5e-5, 
-                  eps = 1e-8 # args.adam_epsilon  - default is 1e-8.
-                )
-    scheduler = get_linear_schedule_with_warmup(optimizer, 
+    bert = nmodel.embeddings
+    params = list(nmodel.linear.parameters())+list(nmodel.fc.parameters)
+    optimizer1 = AdamW(bert.parameters(), lr=lr1, eps = 1e-8)
+    optimizer2 = AdamW(params, lr=lr2, eps = 1e-8)
+    scheduler1 = get_linear_schedule_with_warmup(optimizer1, 
+                                                num_warmup_steps = 0, # Default value in run_glue.py
+                                                num_training_steps = total_steps)
+    scheduler2 = get_linear_schedule_with_warmup(optimizer2, 
                                                 num_warmup_steps = 0, # Default value in run_glue.py
                                                 num_training_steps = total_steps)
     criterion = nn.CrossEntropyLoss()
@@ -214,11 +189,14 @@ def train(training_dataloader, validation_dataloader, nmodel, epochs = 5, lr = 2
             if step%50==0:
                 print('Loss = '+str(total_train_loss/(step+1.00)))
             total_train_loss += loss
-            optimizer.zero_grad()
+            optimizer1.zero_grad()
+            optimizer2.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(nmodel.parameters(), 1.0)
-            optimizer.step()
-            scheduler.step()
+            torch.nn.utils.clip_grad_norm_(bert.parameters(), 1.0)
+            optimizer1.step()
+            optimizer2.step()
+            scheduler1.step()
+            scheduler2.step()
         nmodel.eval()
         total_eval_accuracy = 0
         nb_eval_steps = 0
@@ -261,6 +239,22 @@ if __name__=="__main__":
         train_data, validation_data, test_data = pickle.load(f)
         f.close()
 
+        train_signal = train_data['signal'].values
+        train_signal = conv_np(train_signal)
+        m,s = train_signal.mean(axis=0), train_signal.std(axis=0)
+        train_signal = normalize(train_signal, m, s)
+        train_data['signal'] = list(train_signal)
+
+        val_signal = validation_data['signal'].values
+        val_signal = conv_np(val_signal)
+        val_signal = normalize(val_signal, m,s)
+        validation_data['signal'] = list(val_signal)
+
+        test_signal = test_data['signal'].values
+        test_signal = conv_np(test_signal)
+        test_signal = normalize(test_signal, m,s)
+        test_data['signal'] = list(test_signal)
+
         train_dataset = get_dataset(train_data)
         val_dataset = get_dataset(validation_data)
         test_dataset = get_dataset(test_data)
@@ -270,30 +264,37 @@ if __name__=="__main__":
         test_dataloader = get_dataloader(test_dataset, batch_size = batch_size, train = False)
 
         results = {}
-        learning_rates = [1.5e-5, 2e-5, 2.5e-5]
-        learning_rates = [2e-5]
-        hidden_sizes = [25,50,100,200,500]
-        for lr in learning_rates:
-            for size in hidden_sizes:
-                D_in, hidden_size,num_labels, feature_dim = 768, size, 3, train_dataset[0][3].shape[0]
-                nmodel1 = BERT_Linear_Feature( hidden_size, D_in, num_labels, feature_dim)
-                nmodel1.to('cpu')
-                nmodel = copy.deepcopy(nmodel1)
-                nmodel.to(device)
-                model = torch.nn.DataParallel(nmodel, device_ids = [1,0])
-                best_model, best_acc, best_micro, best_macro = train(training_dataloader, validation_dataloader, (model), epochs = 8, lr=lr)
-                acc, micro, macro = evaluate(test_dataloader, best_model)   
-                print((acc,micro,macro))
-                results[(lr,size)]=(acc, micro, macro)
+        lr1s = [1e-5, 2e-5]
+        lr2s = [1e-3, 1e-4]
 
         f = open(fil+'results_dic.pkl', 'wb')
         pickle.dump(results, f)
         f.close()
 
         f = open(fil+'results.csv', 'w')
-        f.write('lr,hidden_size,acc,micro, macro\n')
-        for (lr,size) in results.keys():
-            acc, micro, macro = results[(lr,size)]
-            f.write(str(lr)+','+str(size)+','+str(acc)+','+str(micro)+','+str(macro)+',\n')
+        f.write('lr1,lr2,test_acc,test_micro,test_macro,val_acc,val_micro,val_macro\n')
+
+        for lr1 in lr1s:
+            for lr2 in lr2s:
+                D_in, hidden_size,num_labels, feature_dim = 768, size, 3, train_dataset[0][3].shape[0]
+                nmodel1 = BERT_Linear_Feature(D_in, num_labels, feature_dim)
+                nmodel1.to('cpu')
+                nmodel = copy.deepcopy(nmodel1)
+                nmodel.to(device)
+                # nmodel = torch.nn.DataParallel(nmodel, device_ids = [1,0])
+                best_model, best_acc, best_micro, best_macro = train(training_dataloader, validation_dataloader, (nmodel), epochs = 6, lr1=lr1, lr2=lr2)
+                acc, micro, macro = evaluate(test_dataloader, best_model)   
+                print((acc,micro,macro))
+                results[(lr1,lr2)]=(acc, micro, macro, best_acc, best_micro, best_macro)
+                f.write(str(lr1)+','+str(lr2)+','+str(acc)+','+str(micro)+','+str(macro)+str(best_acc)+','+str(best_micro)+','+str(best_macro)+',\n')
+
         f.close()
+        
+        f = open(fil+'results_dic.pkl', 'wb')
+        pickle.dump(results, f)
+        f.close()
+        # for (lr,size) in results.keys():
+        #     acc, micro, macro, best_acc, best_micro, best_macro = results[(lr,size)]
+        #     f.write(str(lr)+','+str(size)+','+str(acc)+','+str(micro)+','+str(macro)+str(best_acc)+','+str(best_micro)+','+str(best_macro)+',\n')
+        
 
