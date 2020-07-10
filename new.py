@@ -149,6 +149,7 @@ def evaluate(test_dataloader, nmodel):
 def train(training_dataloader, validation_dataloader, nmodel, epochs = 5, lr1=2e-5, lr2=2e-4):
     total_steps = len(training_dataloader) * epochs
     bert = nmodel.embeddings
+#    params = list(nmodel.linear.parameters())
     params = list(nmodel.linear.parameters())+list(nmodel.fc.parameters())
     optimizer1 = AdamW(bert.parameters(), lr=lr1, eps = 1e-8)
     optimizer2 = AdamW(params, lr=lr2, eps = 1e-8)
@@ -219,9 +220,10 @@ def train(training_dataloader, validation_dataloader, nmodel, epochs = 5, lr1=2e
 
 if __name__=="__main__":
     batch_size = int(sys.argv[1])
-    filenames = ['hate_dataset_23.pkl','hate_dataset_9.pkl','hate_dataset_23_with_sel.pkl']
+    filenames = ['humour_dataset_23.pkl','humour_dataset_9.pkl','humour_dataset_29_with_sel.pkl']
+    #filenames = ['humour_dataset_23.pkl']
     for fil in filenames:
-        folder = './Hate_Datasets/'
+        folder = './Humour_Datasets/'
         filename = folder + fil
         f = open(filename, 'rb')
         data = pickle.load(f)
@@ -241,18 +243,17 @@ if __name__=="__main__":
         features = signals
 
         results = {}
-        lr1s = [2e-5, 3e-5, 5e-5]
+        lr1s = [2e-5, 3e-5]
         lr2s = [1e-3, 1e-4]
 
         f = open(fil+'results.csv', 'a')
         f.write('batch_size,lr1,lr2,test_acc,test_micro,test_macro,val_acc,val_micro,val_macro\n')
 
+        #inputs, masks, tokens, labels, features = sklearn.utils.shuffle(inputs, masks, tokens, labels, features, random_state=42)
+        inputs_train, inputs_test, masks_train, masks_test, tokens_train, tokens_test, labels_train, labels_test, features_train, features_test = train_test_split(inputs, masks,tokens,labels, features,stratify=labels, test_size=0.1, random_state=42)
+        inputs_train, inputs_val, masks_train, masks_val, tokens_train, tokens_val, labels_train, labels_val, features_train, features_val = train_test_split(inputs_train, masks_train,tokens_train,labels_train, features_train,stratify=labels_train, test_size=0.11, random_state=42)
         for lr1 in lr1s:
             for lr2 in lr2s:
-                inputs, masks, tokens, labels, features = sklearn.utils.shuffle(inputs, masks, tokens, labels, features, random_state=42)
-                inputs_train, inputs_test, masks_train, masks_test, tokens_train, tokens_test, labels_train, labels_test, features_train, features_test = train_test_split(inputs, masks,tokens,labels, features,stratify=labels, test_size=0.1, random_state=42)
-                inputs_train, inputs_val, masks_train, masks_val, tokens_train, tokens_val, labels_train, labels_val, features_train, features_val = train_test_split(inputs_train, masks_train,tokens_train,labels_train, features_train,stratify=labels_train, test_size=0.11, random_state=42)
-
                 training_inputs = torch.tensor(inputs_train)
                 validation_inputs = torch.tensor(inputs_val)
                 test_inputs = torch.tensor(inputs_test)
@@ -278,7 +279,7 @@ if __name__=="__main__":
                 training_sampler = RandomSampler(training_data)
                 training_dataloader = DataLoader(training_data, sampler=training_sampler, batch_size=batch_size)
 
-                validatiom_data = TensorDataset(validation_inputs, validation_masks,validation_tokens, validation_features, validation_labels)
+                validation_data = TensorDataset(validation_inputs, validation_masks,validation_tokens, validation_features, validation_labels)
                 validation_sampler = SequentialSampler(validation_data)
                 validation_dataloader = DataLoader(validation_data, sampler=validation_sampler, batch_size=batch_size)
 
@@ -288,9 +289,9 @@ if __name__=="__main__":
                 # print(training_data[0])
                 D_in, hidden_size,num_labels, feature_dim = 768, 100, 3, training_data[0][3].shape[0]
                 nmodel = BERT_Linear_Feature( hidden_size, D_in, num_labels, feature_dim).to(device)
-                # nmodel = BERT_Linear( D_in, num_labels, feature_dim).to(device)
+               # nmodel = BERT_Linear( D_in, num_labels, feature_dim).to(device)
 
-                best_model, best_acc, best_micro, best_macro = train(training_dataloader, validation_dataloader, copy.deepcopy(nmodel), epochs = 6, lr1=lr1, lr2=lr2)
+                best_model, best_acc, best_micro, best_macro = train(training_dataloader, validation_dataloader, copy.deepcopy(nmodel), epochs = 4, lr1=lr1, lr2=lr2)
                 acc, micro, macro = evaluate(test_dataloader, best_model)   
                 print((acc,micro,macro))
                 results[(lr1,lr2)]=(batch_size,acc, micro, macro, best_acc, best_micro, best_macro)
