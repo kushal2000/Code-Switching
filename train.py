@@ -37,7 +37,7 @@ print(torch.cuda.get_device_name(1))
 def normalize(x, m, s): return (x-m)/s
 
 def conv_np(data):
-    blank = np.zeros((len(data), 23))
+    blank = np.zeros((len(data), len(data[0])))
     for i in range(len(data)):
         blank[i] = np.asarray([float(f) for f in data[i]])
     return blank
@@ -99,11 +99,11 @@ class BERT_Linear(torch.nn.Module):
     def __init__(self, D_in, num_labels, feature_dim):
         super(BERT_Linear, self).__init__()
         self.embeddings = BertModel.from_pretrained('bert-base-multilingual-cased',  output_hidden_states = True)
-        self.linear1 = nn.Linear(D_in, num_labels, bias = True)
+        self.linear = nn.Linear(D_in, num_labels, bias = True)
 
     def forward(self, x, x_feature, x_mask, tokens):
-        embeddings = self.embeddings(x,x_mask, tokens)
-        y_pred = (self.linear1(embeddings))
+        embeddings = self.embeddings(x,x_mask, tokens)[1]
+        y_pred = (self.linear(embeddings))
         return y_pred
 
 class BERT_Linear_Feature(torch.nn.Module):
@@ -161,7 +161,7 @@ def evaluate(test_dataloader, nmodel):
 def train(training_dataloader, validation_dataloader, nmodel, epochs = 5, lr1=2e-5, lr2=1e-4):
     total_steps = len(training_dataloader) * epochs
     bert = nmodel.embeddings
-    params = list(nmodel.linear.parameters())+list(nmodel.fc.parameters)
+    params = list(nmodel.linear.parameters())
     optimizer1 = AdamW(bert.parameters(), lr=lr1, eps = 1e-8)
     optimizer2 = AdamW(params, lr=lr2, eps = 1e-8)
     scheduler1 = get_linear_schedule_with_warmup(optimizer1, 
@@ -231,7 +231,7 @@ def train(training_dataloader, validation_dataloader, nmodel, epochs = 5, lr1=2e
 
 if __name__=="__main__":
     batch_size = int(sys.argv[1])
-    filenames = ['sentiment_dataset_23.pkl', 'sentiment_dataset_15.pkl', 'sentiment_dataset_9.pkl', 'sentiment_dataset_23_with_sel.pkl', 'sentiment_dataset_29_with_sel.pkl']
+    filenames = ['sentiment_dataset_23.pkl']
     for fil in filenames:
         folder = './Sentiment_Datasets/'
         filename = folder + fil
@@ -264,20 +264,16 @@ if __name__=="__main__":
         test_dataloader = get_dataloader(test_dataset, batch_size = batch_size, train = False)
 
         results = {}
-        lr1s = [1e-5, 2e-5]
-        lr2s = [1e-3, 1e-4]
+        lr1s = [2e-5, 3e-5, 5e-5]
+        lr2s = [5e-3, 1e-3, 1e-4]
 
-        f = open(fil+'results_dic.pkl', 'wb')
-        pickle.dump(results, f)
-        f.close()
-
-        f = open(fil+'results.csv', 'w')
-        f.write('lr1,lr2,test_acc,test_micro,test_macro,val_acc,val_micro,val_macro\n')
+        f = open('Sentiment_results.csv', 'a')
+        f.write('batch_size,lr1,lr2,test_acc,test_micro,test_macro,val_acc,val_micro,val_macro\n')
 
         for lr1 in lr1s:
             for lr2 in lr2s:
-                D_in, hidden_size,num_labels, feature_dim = 768, size, 3, train_dataset[0][3].shape[0]
-                nmodel1 = BERT_Linear_Feature(D_in, num_labels, feature_dim)
+                D_in, hidden_size,num_labels, feature_dim = 768, 100, 3, train_dataset[0][3].shape[0]
+                nmodel1 = BERT_Linear(D_in, num_labels, feature_dim)
                 nmodel1.to('cpu')
                 nmodel = copy.deepcopy(nmodel1)
                 nmodel.to(device)
@@ -285,12 +281,12 @@ if __name__=="__main__":
                 best_model, best_acc, best_micro, best_macro = train(training_dataloader, validation_dataloader, (nmodel), epochs = 6, lr1=lr1, lr2=lr2)
                 acc, micro, macro = evaluate(test_dataloader, best_model)   
                 print((acc,micro,macro))
-                results[(lr1,lr2)]=(acc, micro, macro, best_acc, best_micro, best_macro)
-                f.write(str(lr1)+','+str(lr2)+','+str(acc)+','+str(micro)+','+str(macro)+str(best_acc)+','+str(best_micro)+','+str(best_macro)+',\n')
+                results[(lr1,lr2)]=(batch_size,acc, micro, macro, best_acc, best_micro, best_macro)
+                f.write(str(batch_size)+','+str(lr1)+','+str(lr2)+','+str(acc)+','+str(micro)+','+str(macro)+','+str(best_acc)+','+str(best_micro)+','+str(best_macro)+'\n')
 
         f.close()
         
-        f = open(fil+'results_dic.pkl', 'wb')
+        f = open('Sentiment_results_dic.pkl', 'wb')
         pickle.dump(results, f)
         f.close()
         # for (lr,size) in results.keys():
