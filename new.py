@@ -1,3 +1,4 @@
+from tqdm import tqdm
 from transformers import BertModel, RobertaModel, BertTokenizer, RobertaTokenizer, AdamW, get_linear_schedule_with_warmup
 import torch
 from torch.utils.data import TensorDataset, RandomSampler, SequentialSampler, random_split, DataLoader, IterableDataset, ConcatDataset
@@ -22,7 +23,9 @@ import copy
 import random
 import sys
 from sklearn import preprocessing
-from tqdm import tqdm
+from sklearn.model_selection import train_test_split
+from sklearn.model_selection import KFold
+from sklearn.model_selection import StratifiedKFold
 
 RANDOM_SEED = 42
 np.random.seed(RANDOM_SEED)
@@ -31,16 +34,23 @@ random.seed(RANDOM_SEED)
 torch.cuda.manual_seed_all(RANDOM_SEED)
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 n_gpu = torch.cuda.device_count()
+torch.cuda.get_device_name(0)
 print(n_gpu)
 print(torch.cuda.get_device_name(1))
 
-def normalize(x, m, s): return (x-m)/s
-
-def conv_np(data):
-    blank = np.zeros((len(data), len(data[0])))
-    for i in range(len(data)):
-        blank[i] = np.asarray([float(f) for f in data[i]])
-    return blank
+def run_feature_selection(signal_feature, feature_list, labels):
+    feature_dict =  {}
+    for j, i in enumerate(feature_list):
+        feature_dict[i]=j
+    results = {}
+    # BORUTA
+    rf = RandomForestClassifier(n_jobs=-1, class_weight='balanced', max_depth=5)
+    feat_selector = BorutaPy(rf, n_estimators='auto', verbose=1, random_state=1)
+    feat_selector.fit(signal_feature, labels)
+    df = pd.DataFrame(np.array([feature_list, feat_selector.support_, feat_selector.ranking_]).T, columns=['feature', 'T/F', 'Rank'])
+    print(df.sort_values(by=['Rank']))
+    print('------ BORUTA ------')
+    return feat_selector
 
 def tokenize(sentences, use_type_tokens = True, padding = True):
     tokenizer = BertTokenizer.from_pretrained('bert-base-multilingual-cased')
@@ -67,33 +77,11 @@ def tokenize(sentences, use_type_tokens = True, padding = True):
     if use_type_tokens :
         token_type_ids = torch.cat(token_type_ids, dim=0)
 
+    
+    #TODO: Pass dictionary instead of tuple
     if use_type_tokens :
+        # print("input ids: {} attention_masks: {} token_type_ids: {}".format(input_ids.shape, attention_masks.shape, token_type_ids.shape))
         return (input_ids, attention_masks, token_type_ids)
-
-def get_dataset(data):
-    input_ids, attention_masks, token_type_ids = tokenize(data['clean_devanagari'])
-    signals = list(data['signal'])
-    features = torch.Tensor(signals)
-    labels = torch.Tensor(list(data['sentiment']))
-    dataset = TensorDataset(input_ids, attention_masks, token_type_ids, features, labels)
-    return dataset
-
-def get_dataloader(dataset, batch_size = 32, train=True, split=True):
-    if train:
-        dataloader = DataLoader(
-            dataset,
-            sampler=RandomSampler(dataset),   
-            batch_size=batch_size,
-            num_workers=8
-        )
-    else:
-        dataloader = DataLoader(
-            dataset,
-            sampler=SequentialSampler(dataset),  
-            batch_size=batch_size,
-            num_workers=8
-        )
-    return dataloader
 
 class BERT_Linear(torch.nn.Module):
     def __init__(self, D_in, num_labels, feature_dim):
@@ -107,7 +95,7 @@ class BERT_Linear(torch.nn.Module):
         return y_pred
 
 class BERT_Linear_Feature(torch.nn.Module):
-    def __init__(self, D_in, num_labels, feature_dim):
+    def __init__(self, hidden_size, D_in, num_labels, feature_dim):
         super(BERT_Linear_Feature, self).__init__()
         self.embeddings = BertModel.from_pretrained('bert-base-multilingual-cased',  output_hidden_states = True)
         self.linear = nn.Linear(D_in+feature_dim, num_labels, bias = True)
@@ -158,10 +146,10 @@ def evaluate(test_dataloader, nmodel):
     macro_f1, micro_f1 = f1_score(y_test, y_preds, average='macro'), f1_score(y_test, y_preds, average='micro')
     return avg_val_accuracy, micro_f1, macro_f1
 
-def train(training_dataloader, validation_dataloader, nmodel, epochs = 5, lr1=2e-5, lr2=1e-4):
+def train(training_dataloader, validation_dataloader, nmodel, epochs = 5, lr1=2e-5, lr2=2e-4):
     total_steps = len(training_dataloader) * epochs
     bert = nmodel.embeddings
-    params = list(nmodel.linear.parameters())
+    params = list(nmodel.linear.parameters())+list(nmodel.fc.parameters())
     optimizer1 = AdamW(bert.parameters(), lr=lr1, eps = 1e-8)
     optimizer2 = AdamW(params, lr=lr2, eps = 1e-8)
     scheduler1 = get_linear_schedule_with_warmup(optimizer1, 
@@ -231,66 +219,80 @@ def train(training_dataloader, validation_dataloader, nmodel, epochs = 5, lr1=2e
 
 if __name__=="__main__":
     batch_size = int(sys.argv[1])
-    filenames = ['sentiment_dataset_23.pkl']
+    filenames = ['hate_dataset_23.pkl','hate_dataset_9.pkl','hate_dataset_23_with_sel.pkl']
     for fil in filenames:
-        folder = './Sentiment_Datasets/'
+        folder = './Hate_Datasets/'
         filename = folder + fil
         f = open(filename, 'rb')
-        train_data, validation_data, test_data = pickle.load(f)
+        data = pickle.load(f)
         f.close()
 
-        train_signal = train_data['signal'].values
-        train_signal = conv_np(train_signal)
-        m,s = train_signal.mean(axis=0), train_signal.std(axis=0)
-        train_signal = normalize(train_signal, m, s)
-        train_data['signal'] = list(train_signal)
-
-        val_signal = validation_data['signal'].values
-        val_signal = conv_np(val_signal)
-        val_signal = normalize(val_signal, m,s)
-        validation_data['signal'] = list(val_signal)
-
-        test_signal = test_data['signal'].values
-        test_signal = conv_np(test_signal)
-        test_signal = normalize(test_signal, m,s)
-        test_data['signal'] = list(test_signal)
-
-        train_dataset = get_dataset(train_data)
-        val_dataset = get_dataset(validation_data)
-        test_dataset = get_dataset(test_data)
-
-        training_dataloader = get_dataloader(train_dataset, batch_size=batch_size)
-        validation_dataloader = get_dataloader(val_dataset, batch_size=batch_size, train=False)
-        test_dataloader = get_dataloader(test_dataset, batch_size = batch_size, train = False)
+        signals = data['signal'].values
+        labels = data['sentiment'].values
+        blank = np.zeros((len(signals),len(signals[0])))
+        for i in range(len(signals)):
+            blank[i] = np.asarray(signals[i])
+        signals = blank
+        inputs, masks, tokens = tokenize(data['clean_devanagari'])
+        inputs = np.asarray(inputs)
+        masks = np.asarray(masks)
+        tokens = np.asarray(tokens)
+        labels = np.asarray(data['sentiment'])
+        features = signals
 
         results = {}
         lr1s = [2e-5, 3e-5, 5e-5]
-        lr2s = [5e-3, 1e-3, 1e-4]
+        lr2s = [1e-3, 1e-4]
 
-        f = open('Sentiment_results.csv', 'a')
+        f = open(fil+'results.csv', 'a')
         f.write('batch_size,lr1,lr2,test_acc,test_micro,test_macro,val_acc,val_micro,val_macro\n')
 
         for lr1 in lr1s:
             for lr2 in lr2s:
-                D_in, hidden_size,num_labels, feature_dim = 768, 100, 3, train_dataset[0][3].shape[0]
-                nmodel1 = BERT_Linear(D_in, num_labels, feature_dim)
-                nmodel1.to('cpu')
-                nmodel = copy.deepcopy(nmodel1)
-                nmodel.to(device)
-                # nmodel = torch.nn.DataParallel(nmodel, device_ids = [1,0])
-                best_model, best_acc, best_micro, best_macro = train(training_dataloader, validation_dataloader, (nmodel), epochs = 6, lr1=lr1, lr2=lr2)
+                inputs, masks, tokens, labels, features = sklearn.utils.shuffle(inputs, masks, tokens, labels, features, random_state=42)
+                inputs_train, inputs_test, masks_train, masks_test, tokens_train, tokens_test, labels_train, labels_test, features_train, features_test = train_test_split(inputs, masks,tokens,labels, features,stratify=labels, test_size=0.1, random_state=42)
+                inputs_train, inputs_val, masks_train, masks_val, tokens_train, tokens_val, labels_train, labels_val, features_train, features_val = train_test_split(inputs_train, masks_train,tokens_train,labels_train, features_train,stratify=labels_train, test_size=0.11, random_state=42)
+
+                training_inputs = torch.tensor(inputs_train)
+                validation_inputs = torch.tensor(inputs_val)
+                test_inputs = torch.tensor(inputs_test)
+
+                training_labels = torch.tensor(labels_train)
+                validation_labels = torch.tensor(labels_val)
+                test_labels = torch.tensor(labels_test)
+
+                training_masks = torch.tensor(masks_train)
+                validation_masks = torch.tensor(masks_val)
+                test_masks = torch.tensor(masks_test)
+
+                training_features = torch.tensor(features_train)
+                validation_features = torch.tensor(features_val)
+                test_features = torch.tensor(features_test)
+
+                training_tokens = torch.tensor(tokens_train)
+                validation_tokens = torch.tensor(tokens_val)
+                test_tokens = torch.tensor(tokens_test)
+
+                # Create an iterator of our data with torch DataLoader 
+                training_data = TensorDataset(training_inputs, training_masks, training_tokens,training_features, training_labels)
+                training_sampler = RandomSampler(training_data)
+                training_dataloader = DataLoader(training_data, sampler=training_sampler, batch_size=batch_size)
+
+                validatiom_data = TensorDataset(validation_inputs, validation_masks,validation_tokens, validation_features, validation_labels)
+                validation_sampler = SequentialSampler(validation_data)
+                validation_dataloader = DataLoader(validation_data, sampler=validation_sampler, batch_size=batch_size)
+
+                test_data = TensorDataset(test_inputs, test_masks,test_tokens, test_features, test_labels)
+                test_sampler = SequentialSampler(test_data)
+                test_dataloader = DataLoader(test_data, sampler=test_sampler, batch_size=batch_size)
+                # print(training_data[0])
+                D_in, hidden_size,num_labels, feature_dim = 768, 100, 3, training_data[0][3].shape[0]
+                nmodel = BERT_Linear_Feature( hidden_size, D_in, num_labels, feature_dim).to(device)
+                # nmodel = BERT_Linear( D_in, num_labels, feature_dim).to(device)
+
+                best_model, best_acc, best_micro, best_macro = train(training_dataloader, validation_dataloader, copy.deepcopy(nmodel), epochs = 6, lr1=lr1, lr2=lr2)
                 acc, micro, macro = evaluate(test_dataloader, best_model)   
                 print((acc,micro,macro))
                 results[(lr1,lr2)]=(batch_size,acc, micro, macro, best_acc, best_micro, best_macro)
                 f.write(str(batch_size)+','+str(lr1)+','+str(lr2)+','+str(acc)+','+str(micro)+','+str(macro)+','+str(best_acc)+','+str(best_micro)+','+str(best_macro)+'\n')
-
         f.close()
-        
-        f = open('Sentiment_results_dic.pkl', 'wb')
-        pickle.dump(results, f)
-        f.close()
-        # for (lr,size) in results.keys():
-        #     acc, micro, macro, best_acc, best_micro, best_macro = results[(lr,size)]
-        #     f.write(str(lr)+','+str(size)+','+str(acc)+','+str(micro)+','+str(macro)+str(best_acc)+','+str(best_micro)+','+str(best_macro)+',\n')
-        
-
