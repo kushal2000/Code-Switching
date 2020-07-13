@@ -11,7 +11,10 @@ class BERT_Linear_Feature(torch.nn.Module):
         self.feature_dim = feature_dim
         self.hidden_size = hidden_size
         self.embeddings = BertModel.from_pretrained('bert-base-multilingual-cased',  output_hidden_states = True)
-        self.linear = nn.Linear(D_in, max(num_labels, hidden_size), bias = True)
+        if hidden_size==0:
+            self.linear = nn.Linear(D_in+feature_dim, max(num_labels, hidden_size), bias = True)
+        else:
+            self.linear = nn.Linear(D_in, max(num_labels, hidden_size), bias = True)
         self.fc = nn.Linear(max(feature_dim,1) , max(feature_dim,1) , bias = True)
         self.final = nn.Linear(max(hidden_size + feature_dim, 1), num_labels, bias = True)
         self.dropout = nn.Dropout(0.25)
@@ -40,6 +43,6 @@ class BERT_Linear_Feature(torch.nn.Module):
         if self.hidden_size == 0:
             y_pred = (self.linear(embed))
             return y_pred
-            
+
         y_pred = self.final(embed)
         return y_pred
