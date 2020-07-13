@@ -38,78 +38,6 @@ torch.cuda.get_device_name(0)
 print(n_gpu)
 print(torch.cuda.get_device_name(1))
 
-def run_feature_selection(signal_feature, feature_list, labels):
-    feature_dict =  {}
-    for j, i in enumerate(feature_list):
-        feature_dict[i]=j
-    results = {}
-    # BORUTA
-    rf = RandomForestClassifier(n_jobs=-1, class_weight='balanced', max_depth=5)
-    feat_selector = BorutaPy(rf, n_estimators='auto', verbose=1, random_state=1)
-    feat_selector.fit(signal_feature, labels)
-    df = pd.DataFrame(np.array([feature_list, feat_selector.support_, feat_selector.ranking_]).T, columns=['feature', 'T/F', 'Rank'])
-    print(df.sort_values(by=['Rank']))
-    print('------ BORUTA ------')
-    return feat_selector
-
-def tokenize(sentences, use_type_tokens = True, padding = True):
-    tokenizer = BertTokenizer.from_pretrained('bert-base-multilingual-cased')
-    input_ids = []
-    attention_masks = []
-    token_type_ids = []
-    max_len = 128
-    for sent in sentences:
-        encoded_dict = tokenizer.encode_plus(sent,
-                                                add_special_tokens=True,
-                                                max_length=max_len, 
-                                                pad_to_max_length=padding, 
-                                                return_attention_mask = True,
-                                                return_tensors = 'pt', 
-                                                return_token_type_ids = use_type_tokens,
-                                                truncation = True)
-        input_ids.append(encoded_dict['input_ids'])
-        attention_masks.append(encoded_dict['attention_mask'])
-        if use_type_tokens :
-            token_type_ids.append(encoded_dict['token_type_ids'])
-    
-    input_ids = torch.cat(input_ids, dim=0)
-    attention_masks = torch.cat(attention_masks, dim=0)
-    if use_type_tokens :
-        token_type_ids = torch.cat(token_type_ids, dim=0)
-
-    
-    #TODO: Pass dictionary instead of tuple
-    if use_type_tokens :
-        # print("input ids: {} attention_masks: {} token_type_ids: {}".format(input_ids.shape, attention_masks.shape, token_type_ids.shape))
-        return (input_ids, attention_masks, token_type_ids)
-
-class BERT_Linear(torch.nn.Module):
-    def __init__(self, D_in, num_labels, feature_dim):
-        super(BERT_Linear, self).__init__()
-        self.embeddings = BertModel.from_pretrained('bert-base-multilingual-cased',  output_hidden_states = True)
-        self.linear = nn.Linear(D_in, num_labels, bias = True)
-
-    def forward(self, x, x_feature, x_mask, tokens):
-        embeddings = self.embeddings(x,x_mask, tokens)[1]
-        y_pred = (self.linear(embeddings))
-        return y_pred
-
-class BERT_Linear_Feature(torch.nn.Module):
-    def __init__(self, hidden_size, D_in, num_labels, feature_dim):
-        super(BERT_Linear_Feature, self).__init__()
-        self.embeddings = BertModel.from_pretrained('bert-base-multilingual-cased',  output_hidden_states = True)
-        self.linear = nn.Linear(D_in+feature_dim, num_labels, bias = True)
-        self.fc = nn.Linear(feature_dim, feature_dim, bias = True)
-        self.dropout = nn.Dropout(0.25)
-
-    def forward(self, x, x_feature, x_mask, token):
-        embeddings = self.embeddings(x,x_mask, token)[1]
-        feat = F.relu(self.fc(x_feature.float()))
-        feat = self.dropout(feat)
-        embed = torch.cat([embeddings, feat], 1)
-        y_pred = (self.linear(embed))
-        return y_pred
-
 def flat_accuracy(preds, labels):
     pred_flat = np.argmax(preds, axis=1).flatten()
     labels_flat = labels.flatten()
@@ -119,15 +47,13 @@ def get_predicted(preds):
     pred_flat = np.argmax(preds, axis=1).flatten()
     return pred_flat
 
-def format_time(elapsed):
-    elapsed_rounded = int(round((elapsed)))
-    return str(datetime.timedelta(seconds=elapsed_rounded))
-
 def evaluate(test_dataloader, nmodel):
     nmodel.eval()
     total_eval_accuracy=0
     y_preds = np.array([])
     y_test = np.array([])
+    total_loss = 0
+    criterion = nn.CrossEntropyLoss()
     for batch in test_dataloader:
         b_input_ids = batch[0].to(device).long()
         b_input_mask = batch[1].to(device).long()
@@ -136,6 +62,8 @@ def evaluate(test_dataloader, nmodel):
         b_labels = batch[4].to(device).long()
         with torch.no_grad():        
             ypred = nmodel(b_input_ids, b_features, b_input_mask, b_tokens)
+        loss = criterion(ypred, b_labels)
+        total_loss += loss
         ypred = ypred.detach().cpu().numpy()
         label_ids = b_labels.to('cpu').numpy()
         total_eval_accuracy += flat_accuracy(ypred, label_ids)
@@ -144,9 +72,9 @@ def evaluate(test_dataloader, nmodel):
         y_test = np.hstack((y_test, label_ids))
     avg_val_accuracy = total_eval_accuracy / len(test_dataloader)
     macro_f1, micro_f1 = f1_score(y_test, y_preds, average='macro'), f1_score(y_test, y_preds, average='micro')
-    return avg_val_accuracy, micro_f1, macro_f1
+    return avg_val_accuracy, micro_f1, macro_f1, total_loss
 
-def train(training_dataloader, validation_dataloader, nmodel, epochs = 5, lr1=2e-5, lr2=2e-4):
+def train(training_dataloader, validation_dataloader, test_dataloader, nmodel, epochs = 5, lr1=2e-5, lr2=2e-4):
     total_steps = len(training_dataloader) * epochs
     bert = nmodel.embeddings
 #    params = list(nmodel.linear.parameters())
@@ -186,27 +114,12 @@ def train(training_dataloader, validation_dataloader, nmodel, epochs = 5, lr1=2e
             optimizer2.step()
             scheduler1.step()
             scheduler2.step()
-        nmodel.eval()
-        total_eval_accuracy = 0
-        nb_eval_steps = 0
-        y_preds = np.array([])
-        y_test = np.array([])
-        for batch in validation_dataloader:
-            b_input_ids = batch[0].to(device).long()
-            b_input_mask = batch[1].to(device).long()
-            b_tokens = batch[2].to(device).long()
-            b_features = batch[3].to(device).long()
-            b_labels = batch[4].to(device).long()
-            with torch.no_grad():        
-                ypred = nmodel(b_input_ids, b_features, b_input_mask, b_tokens)
-            ypred = ypred.detach().cpu().numpy()
-            label_ids = b_labels.to('cpu').numpy()
-            total_eval_accuracy += flat_accuracy(ypred, label_ids)
-            ypred = get_predicted(ypred)
-            y_preds = np.hstack((y_preds, ypred))
-            y_test = np.hstack((y_test, label_ids))
-        avg_val_accuracy = total_eval_accuracy / len(validation_dataloader)
-        macro_f1, micro_f1 = f1_score(y_test, y_preds, average='macro'), f1_score(y_test, y_preds, average='micro')
+
+        print()
+        print(f'Total Train Loss = {total_train_loss}')
+        print('#############    Validation Set Stats')
+        avg_val_accuracy, micro_f1, macro_f1, val_loss = evaluate(validation_dataloader, nmodel)
+        print(f'Total Validation Loss = {val_loss}')
         print("  Accuracy: {0:.4f}".format(avg_val_accuracy))
         print("  Micro F1: {0:.4f}".format(micro_f1))
         print("  Macro F1: {0:.4f}".format(macro_f1))
@@ -215,6 +128,15 @@ def train(training_dataloader, validation_dataloader, nmodel, epochs = 5, lr1=2e
             best_macro = macro_f1
             best_acc = avg_val_accuracy
             best_micro = micro_f1
+        
+        print('#############    Test Set Stats')
+        avg_val_accuracy, micro_f1, macro_f1, test_loss = evaluate(test_dataloader, nmodel)
+        print(f'Total Test Loss = {test_loss}')
+        print("  Accuracy: {0:.4f}".format(avg_val_accuracy))
+        print("  Micro F1: {0:.4f}".format(micro_f1))
+        print("  Macro F1: {0:.4f}".format(macro_f1))
+
+        print()
 
     return best_model, best_acc, best_micro, best_macro
 
