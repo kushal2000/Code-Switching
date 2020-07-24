@@ -2,13 +2,14 @@ from transformers import BertModel, RobertaModel, BertTokenizer
 import numpy as np
 import torch
 from torch.utils.data import TensorDataset, RandomSampler, SequentialSampler, random_split, DataLoader, IterableDataset, ConcatDataset
+from sklearn.preprocessing import normalize
 
-def tokenize(sentences, use_type_tokens = True, padding = True):
+def tokenize(sentences, use_type_tokens = True, padding = True, max_len = 128):
     tokenizer = BertTokenizer.from_pretrained('bert-base-multilingual-cased')
     input_ids = []
     attention_masks = []
     token_type_ids = []
-    max_len = 128
+    max_len = max_len
     for sent in sentences:
         encoded_dict = tokenizer.encode_plus(sent,
                                                 add_special_tokens=True,
@@ -40,9 +41,7 @@ def process_data(data):
     blank = np.zeros((len(signals),len(signals[0])))
     for i in range(len(signals)):
         blank[i] = np.asarray(signals[i])
-    signals = blank
-    if signals.shape[1]==23:
-        signals = signals[:, 1:]
+    signals = normalize(blank,axis=0)
     inputs, masks, tokens = tokenize(data['clean_devanagari'])
     inputs = np.asarray(inputs)
     masks = np.asarray(masks)

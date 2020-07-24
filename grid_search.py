@@ -9,4 +9,4 @@ files = ['Humour_Datasets/humour_dataset_9.pkl', 'Humour_Datasets/humour_dataset
 for fil in files:
     for lr in learning_rates:
         for hs in hidden_sizes:
-            os.system(f'python training.py {lr} {hs} {fil}')
+            os.system(f'python bert_cross_val.py {lr} {hs} {fil}')
