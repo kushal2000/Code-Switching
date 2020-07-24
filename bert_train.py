@@ -22,10 +22,6 @@ torch.manual_seed(RANDOM_SEED)
 random.seed(RANDOM_SEED)
 torch.cuda.manual_seed_all(RANDOM_SEED)
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
-n_gpu = torch.cuda.device_count()
-torch.cuda.get_device_name(0)
-print(n_gpu)
-print(torch.cuda.get_device_name(0))
 
 # print(sys.argv)
 folder, file_name = sys.argv[3].split('/')
@@ -52,7 +48,7 @@ print(D_in, hidden_size,num_labels, feature_dim)
 
 nmodel = BERT_Linear_Feature(hidden_size, D_in, num_labels, feature_dim).to(device)
 
-inputs, masks, tokens, labels, features, ids = sklearn.utils.shuffle(inputs, masks, tokens, labels, features, ids,  random_state=42)
+ids, inputs, masks, tokens, labels, features, ids = sklearn.utils.shuffle(inputs, masks, tokens, labels, features, ids,  random_state=42)
 train_index, test_index, _, _ = train_test_split(range(inputs.shape[0]), labels, test_size = 0.2, stratify = labels, random_state = 42)
 
 training_inputs = torch.tensor(inputs[train_index])

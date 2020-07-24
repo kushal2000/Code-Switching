@@ -13,6 +13,12 @@ import numpy as np
 import random
 import sys
 
+RANDOM_SEED = 42
+np.random.seed(RANDOM_SEED)
+torch.manual_seed(RANDOM_SEED)
+random.seed(RANDOM_SEED)
+torch.cuda.manual_seed_all(RANDOM_SEED)
+
 def flat_accuracy(preds, labels):
     pred_flat = np.argmax(preds, axis=1).flatten()
     labels_flat = labels.flatten()

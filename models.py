@@ -5,6 +5,12 @@ import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
 
+RANDOM_SEED = 42
+np.random.seed(RANDOM_SEED)
+torch.manual_seed(RANDOM_SEED)
+random.seed(RANDOM_SEED)
+torch.cuda.manual_seed_all(RANDOM_SEED)
+
 class Attention(nn.Module):
     def __init__(self, feature_dim, step_dim, bias=True, **kwargs):
         super(Attention, self).__init__(**kwargs)
@@ -45,7 +51,7 @@ class Attention(nn.Module):
 
         weighted_input = x * torch.unsqueeze(a, -1)
         return torch.sum(weighted_input, 1), a
-        
+
 class BERT_HAN(torch.nn.Module):
     def __init__(self, hidden_size, D_in, num_labels, feature_dim):
         super(BERT_HAN, self).__init__()

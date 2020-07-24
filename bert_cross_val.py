@@ -43,7 +43,7 @@ f = open(folder + '/' + file_name +'.csv', 'a')
 f.write('Hidden Size \t , Learning Rate \t , Accuracy \t , Micro F1 \t , Macro F1 \n')
 
 k = 5
-inputs, masks, tokens, labels, features = sklearn.utils.shuffle(inputs, masks, tokens, labels, features, random_state=42)
+ids, inputs, masks, tokens, labels, features = sklearn.utils.shuffle(inputs, masks, tokens, labels, features, random_state=42)
 kf = StratifiedKFold(n_splits=k, random_state=42, shuffle=True)
 kf.get_n_splits(inputs, labels)
 
@@ -75,6 +75,9 @@ for train_index, test_index in kf.split(inputs, labels):
 
     training_tokens = torch.tensor(tokens[train_index])
     test_tokens = torch.tensor(tokens[test_index])
+
+    training_ids = torch.tensor(ids[train_index])
+    test_ids = torch.tensor(ids[test_index])
 
     # Create an iterator of our data with torch DataLoader 
     training_data = TensorDataset(training_inputs, training_masks, training_tokens,training_features, training_labels)
