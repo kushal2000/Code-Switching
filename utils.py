@@ -18,6 +18,7 @@ np.random.seed(RANDOM_SEED)
 torch.manual_seed(RANDOM_SEED)
 random.seed(RANDOM_SEED)
 torch.cuda.manual_seed_all(RANDOM_SEED)
+device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 def flat_accuracy(preds, labels):
     pred_flat = np.argmax(preds, axis=1).flatten()
