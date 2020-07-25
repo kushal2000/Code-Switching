@@ -113,7 +113,7 @@ class BERT_Linear_Feature(torch.nn.Module):
             self.linear = nn.Linear(D_in, max(num_labels, hidden_size), bias = True)
         self.fc = nn.Linear(max(feature_dim,1) , max(feature_dim,1) , bias = True)
         self.final = nn.Linear(max(hidden_size + feature_dim, 1), num_labels, bias = True)
-        self.dropout = nn.Dropout(0.25)
+        self.dropout = nn.Dropout(0.1)
 
     def forward(self, x, x_feature, x_mask, token):
         embed = self.embeddings(x,x_mask, token)[1]

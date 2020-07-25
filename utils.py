@@ -58,12 +58,18 @@ def evaluate(test_dataloader, nmodel):
 
 def train(training_dataloader, validation_dataloader, nmodel, epochs = 4, lr1=2e-5, lr2=1e-4):
     total_steps = len(training_dataloader) * epochs
-    bert = nmodel.embeddings
-#    params = list(nmodel.linear.parameters())
-    params = list(nmodel.linear.parameters())+list(nmodel.fc.parameters())+list(nmodel.final.parameters())
+    bert_params = nmodel.embeddings
+    bert_named_params = ['embeddings.'+name_ for name_, param_ in bert_params.named_parameters()]
+    model_named_params = [name_ for name_, param_ in nmodel.named_parameters()]
+    other_named_params = [i for i in model_named_params if i not in bert_named_params]
+    params = []
 
-    optimizer1 = AdamW(bert.parameters(), lr=lr1, eps = 1e-8)
-    optimizer2 = AdamW(params, lr=lr2, eps = 1e-8)
+    for name, param in nmodel.named_parameters():
+        if name in other_named_params:
+            params.append(param)
+    
+    optimizer1 = AdamW(bert_params.parameters(), lr=2e-5, eps = 1e-8)
+    optimizer2 = AdamW(params, lr=1e-4, eps = 1e-8)
     scheduler1 = get_linear_schedule_with_warmup(optimizer1, 
                                                 num_warmup_steps = 0, # Default value in run_glue.py
                                                 num_training_steps = total_steps)
