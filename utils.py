@@ -99,7 +99,7 @@ def train(training_dataloader, validation_dataloader, nmodel, epochs = 4, lr1=2e
             optimizer1.zero_grad()
             optimizer2.zero_grad()
             loss.backward()
-            torch.nn.utils.clip_grad_norm_(bert.parameters(), 1.0)
+            torch.nn.utils.clip_grad_norm_(bert_params.parameters(), 1.0)
             optimizer1.step()
             optimizer2.step()
             scheduler1.step()
