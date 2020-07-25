@@ -2,6 +2,7 @@ from data import *
 from models import *
 from transformers import BertModel, RobertaModel, BertTokenizer, RobertaTokenizer, AdamW, get_linear_schedule_with_warmup
 import torch
+from sklearn.metrics import f1_score 
 from torch.utils.data import TensorDataset, RandomSampler, SequentialSampler, random_split, DataLoader, IterableDataset, ConcatDataset
 import torch.nn as nn
 import torch.nn.functional as F
@@ -11,7 +12,6 @@ from tqdm import tqdm
 import pandas as pd
 import numpy as np
 import random
-import sys
 
 RANDOM_SEED = 42
 np.random.seed(RANDOM_SEED)

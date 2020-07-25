@@ -4,6 +4,9 @@ from torch.utils.data import TensorDataset, RandomSampler, SequentialSampler, ra
 import torch.nn as nn
 import torch.nn.functional as F
 import torch.optim as optim
+import numpy as np
+import pandas as pd
+import random
 
 RANDOM_SEED = 42
 np.random.seed(RANDOM_SEED)
@@ -120,7 +123,7 @@ class BERT_Linear_Feature(torch.nn.Module):
             return y_pred
 
         if self.feature_dim == 0:
-            hidden = self.linear(embed)
+            hidden = F.relu(self.linear(embed))
             hidden = self.dropout(hidden)
             y_pred = self.final(hidden)
             return y_pred
@@ -129,7 +132,7 @@ class BERT_Linear_Feature(torch.nn.Module):
             feat = F.relu(self.fc(x_feature.float()))
             feat = self.dropout(feat)
             if self.hidden_size > 0:
-                embed = self.linear(embed)
+                embed = F.relu(self.linear(embed))
                 embed = self.dropout(embed)
             embed = torch.cat([embed, feat], 1)
 
