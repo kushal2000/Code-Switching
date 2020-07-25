@@ -47,5 +47,5 @@ def process_data(data):
     masks = np.asarray(masks)
     tokens = np.asarray(tokens)
     labels = np.asarray(data['sentiment'])
-    ids = np.arange(len(tweets))
+    ids = np.arange(len(labels))
     return ids, inputs, masks, tokens, labels, signals 
