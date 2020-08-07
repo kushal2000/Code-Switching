@@ -14,6 +14,44 @@ torch.manual_seed(RANDOM_SEED)
 random.seed(RANDOM_SEED)
 torch.cuda.manual_seed_all(RANDOM_SEED)
 
+class Fusion_Net(torch.nn.Module):
+    def __init__(self, hidden_size, D_in, num_labels, feature_dim):
+        super(Fusion_Net, self).__init__()
+        self.feature_dim = feature_dim
+        self.hidden_size = hidden_size
+        self.embeddings = BertModel.from_pretrained('bert-base-multilingual-cased',  output_hidden_states = True)
+        if hidden_size==0:
+            self.linear = nn.Linear(D_in+feature_dim, max(num_labels, hidden_size), bias = True)
+        else:
+            self.linear = nn.Linear(D_in, max(num_labels, hidden_size), bias = True)
+        self.fc = nn.Linear(max(feature_dim,1) , max(feature_dim,1) , bias = True)
+        self.final = nn.Linear(max(hidden_size + feature_dim, 1), num_labels, bias = True)
+        self.dropout = nn.Dropout(0.1)
+
+    def forward(self, x, x_feature, x_mask, token):
+        embed = self.embeddings(x,x_mask, token)[1]
+
+        if self.feature_dim == 0:
+            hidden = F.relu(self.linear(embed))
+            hidden = self.dropout(hidden)
+            y_pred = self.final(hidden)
+            return y_pred
+
+        if self.feature_dim>0:
+            feat = F.relu(self.fc(x_feature.float()))
+            feat = self.dropout(feat)
+            if self.hidden_size > 0:
+                embed = F.relu(self.linear(embed))
+                embed = self.dropout(embed)
+            embed = torch.cat([embed, feat], 1)
+
+        if self.hidden_size == 0:
+            y_pred = (self.linear(embed))
+            return y_pred
+
+        y_pred = self.final(embed)
+        return y_pred
+        
 class Attention(nn.Module):
     def __init__(self, feature_dim, step_dim, bias=True, **kwargs):
         super(Attention, self).__init__(**kwargs)
