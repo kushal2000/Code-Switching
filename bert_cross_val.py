@@ -16,7 +16,7 @@ device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 #### Parse Arguments
 parser = argparse.ArgumentParser()
-parser.add_argument("-f", "--filename", type=str, default='Datasets/Humour/humour_dataset.pkl',
+parser.add_argument("-f", "--filename", type=str, default='Datasets/Humour/data_frame_22.pkl',
                     help="Expects a .pkl file dataset")
 parser.add_argument("-d", "--feature_dim", type=int, default=0,
                     help="Dimension of features")
@@ -32,13 +32,15 @@ parser.add_argument("-e", "--epochs", type=int, default=6,
                     help="Epochs to run Model for")
 parser.add_argument("-k", type=int, default=5,
                     help="Number of folds for k-fold Cross Validation")
+parser.add_argument("-m", "--mode", type=str, default='dev',
+                    help="Romanized or Devanagari Mode")
 args = parser.parse_args()
 
 #### Set Up Dataset - Tokenise the data
 data = {}
 with open(args.filename, 'rb') as f:
     data = pickle.load(f)
-ids, inputs, masks, tokens, labels, features = process_data(data)
+ids, inputs, masks, tokens, labels, features = process_data(data, args.feature_dim, args.mode)
 
 #### Initialise The Model
 model = BERT_Linear_Feature(args.hidden_size, 768, args.num_labels, args.feature_dim).to(device)
@@ -51,6 +53,8 @@ kf.get_n_splits(inputs, labels)
 total_acc = 0
 total_micro = 0
 total_macro = 0
+
+scores = []
 
 for train_index, test_index in kf.split(inputs, labels):
     training_inputs = torch.tensor(inputs[train_index])
@@ -85,8 +89,20 @@ for train_index, test_index in kf.split(inputs, labels):
     total_micro += micro
     total_macro += macro
     
+    score = (macro, acc, micro)
+    scores.append(score)
+    
 print("==================FINAL RESULTS====================")
 print("  Accuracy: {0:.4f}".format(total_acc/args.k))
 print("  Micro F1: {0:.4f}".format(total_micro/args.k))
 print("  Macro F1: {0:.4f}".format(total_macro/args.k))
+print('===================================================')
+print("==================F1 SCORES====================")
+for score in scores: print(score[0])
+print('===================================================')
+print("==================ACC SCORES====================")
+for score in scores: print(score[1])
+print('===================================================')
+
+
 

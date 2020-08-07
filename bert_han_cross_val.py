@@ -32,13 +32,16 @@ parser.add_argument("-e", "--epochs", type=int, default=6,
                     help="Epochs to run Model for")
 parser.add_argument("-k", type=int, default=5,
                     help="Number of folds for k-fold Cross Validation")
+parser.add_argument("-m", "--mode", type=str, default='dev',
+                    help="Romanized or Devanagari Mode")
+
 args = parser.parse_args()
 
 #### Set Up Dataset - Tokenise the data
 data = {}
 with open(args.filename, 'rb') as f:
     data = pickle.load(f)
-ids, inputs, masks, tokens, labels, features = process_data(data)
+ids, inputs, masks, tokens, labels, features = process_data(data, args.feature_dim, args.mode)
 
 #### Initialise The Model
 if args.feature_dim==0:
@@ -83,7 +86,7 @@ for train_index, test_index in kf.split(inputs, labels):
     test_sampler = SequentialSampler(test_data)
     test_dataloader = DataLoader(test_data, sampler=test_sampler, batch_size=args.batch_size)
     
-    best_model, acc, micro, macro = train(training_dataloader, test_dataloader, copy.deepcopy(model), epochs = args.epochs, lr2 = args.learning_rate)
+    best_model, acc, micro, macro = train_v2(training_dataloader, test_dataloader, copy.deepcopy(model), epochs = args.epochs, lr2 = args.learning_rate)
     total_acc += acc
     total_micro += micro
     total_macro += macro

@@ -35,14 +35,23 @@ def tokenize(sentences, use_type_tokens = True, padding = True, max_len = 128):
         # print("input ids: {} attention_masks: {} token_type_ids: {}".format(input_ids.shape, attention_masks.shape, token_type_ids.shape))
         return (input_ids, attention_masks, token_type_ids)
 
-def process_data(data):
+def process_data(data, num_features=22, mode = 'dev'):
     signals = data['signal'].values
     labels = data['sentiment'].values
     blank = np.zeros((len(signals),len(signals[0])))
     for i in range(len(signals)):
         blank[i] = np.asarray(signals[i])
-    signals = normalize(blank,axis=0)
-    inputs, masks, tokens = tokenize(data['clean_devanagari'])
+    signals = blank
+    if signals.shape[1]==29:
+        if num_features == 22:
+            idxs = np.array([1,2,3,4,5,8,9,10,11,12,13,14,17,18,19,20,21,22,25,26,27,28])
+            signals = signals[:,idxs]
+        if num_features == 9:
+            signals = signals[:,6:15]
+    if mode == 'dev':
+        inputs, masks, tokens = tokenize(data['clean_devanagari'])
+    else:
+        inputs, masks, tokens = tokenize(data['clean_romanized'])
     inputs = np.asarray(inputs)
     masks = np.asarray(masks)
     tokens = np.asarray(tokens)

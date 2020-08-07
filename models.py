@@ -73,11 +73,11 @@ class BERT_HAN(torch.nn.Module):
         bert_encoder = self.dropout(bert_encoder)
         attent, attention_weight = self.attent(bert_encoder)
         y_pred = self.linear(attent)
-        return y_pred
+        return y_pred, attention_weight
 
-class BERT_HAN_feature(torch.nn.Module):
+class BERT_HAN_feature_old(torch.nn.Module):
     def __init__(self, hidden_size, D_in, num_labels, feature_dim):
-        super(BERT_HAN_feature, self).__init__()
+        super(BERT_HAN_feature_old, self).__init__()
         self.embeddings = BertModel.from_pretrained('bert-base-multilingual-cased',  output_hidden_states = True)
         self.bert_encoder = nn.LSTM(input_size=D_in,
                                     hidden_size=hidden_size,
@@ -99,7 +99,7 @@ class BERT_HAN_feature(torch.nn.Module):
         # feat = self.dropout(feat)
         embed = torch.cat([attent, feat], 1)
         y_pred = self.linear(embed)
-        return y_pred
+        return y_pred, attention_weight
 
 class BERT_Linear_Feature(torch.nn.Module):
     def __init__(self, hidden_size, D_in, num_labels, feature_dim):
@@ -142,3 +142,36 @@ class BERT_Linear_Feature(torch.nn.Module):
 
         y_pred = self.final(embed)
         return y_pred
+
+class BERT_HAN_feature(torch.nn.Module):
+    def __init__(self, hidden_size, D_in, num_labels, feature_dim):
+        super(BERT_HAN_feature, self).__init__()
+        self.embeddings = BertModel.from_pretrained('bert-base-multilingual-cased',  output_hidden_states = True)
+        self.bert_encoder = nn.LSTM(input_size=D_in,
+                                    hidden_size=hidden_size,
+                                    num_layers=1, 
+                                    bidirectional=True)
+        self.bert_encoder_2 = nn.LSTM(input_size=hidden_size*2,
+                                    hidden_size=feature_dim//2,
+                                    num_layers=1, 
+                                    bidirectional=True)
+        self.attent = Attention(feature_dim, 128+1)
+        self.lin_feat = nn.Linear(feature_dim, feature_dim, bias = True)
+        self.linear = nn.Linear(feature_dim, num_labels, bias = True)
+        self.dropout = nn.Dropout(0.1)
+
+    def forward(self, x, x_feature, x_mask, token):
+        embeddings = self.embeddings(x,x_mask, token)[2][-1]
+        bert_encoder, (h_n, c_n) = self.bert_encoder(embeddings)
+        bert_encoder = self.dropout(bert_encoder)
+        bert_encoder, (h_n, c_n) = self.bert_encoder_2(bert_encoder)
+        bert_encoder = self.dropout(bert_encoder)
+        
+        feat = F.relu(self.lin_feat(x_feature.float()))
+        feat = feat.view(feat.size()[0], 1, feat.size()[1])
+
+        embed = torch.cat([bert_encoder, feat], 1)
+
+        attent, attention_weight = self.attent(embed)
+        y_pred = self.linear(attent)
+        return y_pred, attention_weight
