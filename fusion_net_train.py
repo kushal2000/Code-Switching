@@ -34,8 +34,10 @@ parser.add_argument("-k", type=int, default=5,
                     help="Number of folds for k-fold Cross Validation")
 parser.add_argument("-m", "--mode", type=str, default='dev',
                     help="Romanized or Devanagari Mode")
-parser.add_argument("-a", "--alpha", type=float, default=0.2,
-                    help="Weight for Metric Loss")
+parser.add_argument("-a", "--alpha", type=float, default=0.1,
+                    help="Alpha Weight for Metric Loss")
+parser.add_argument("-b", "--beta", type=float, default=2.0,
+                    help="Beta Weight for Metric Loss")
 
 args = parser.parse_args()
 
@@ -85,7 +87,7 @@ for train_index, test_index in kf.split(inputs, labels):
     test_sampler = SequentialSampler(test_data)
     test_dataloader = DataLoader(test_data, sampler=test_sampler, batch_size=args.batch_size)
     
-    best_model, acc, micro, macro = train1(training_dataloader, test_dataloader, copy.deepcopy(model), epochs = args.epochs, lr2 = args.learning_rate, alpha = args.alpha)
+    best_model, acc, micro, macro = train1(training_dataloader, test_dataloader, copy.deepcopy(model), epochs = args.epochs, lr2 = args.learning_rate, alpha = args.alpha, beta = args.beta)
     total_acc += acc
     total_micro += micro
     total_macro += macro
@@ -94,4 +96,7 @@ print("==================FINAL RESULTS====================")
 print("  Accuracy: {0:.4f}".format(total_acc/args.k))
 print("  Micro F1: {0:.4f}".format(total_micro/args.k))
 print("  Macro F1: {0:.4f}".format(total_macro/args.k))
+f = open(args.filename.replace('pkl','csv'), 'a')
+f.write(f'{args.hidden_size},{args.alpha},{args.beta},{(total_macro/args.k)},{(total_micro/args.k)},{(total_acc/args.k)}\n')
+f.close()
 

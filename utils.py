@@ -21,24 +21,22 @@ torch.cuda.manual_seed_all(RANDOM_SEED)
 device = torch.device("cuda:0" if torch.cuda.is_available() else "cpu")
 
 def metric_loss(preds,labels):
-    # m = nn.Softmax(dim=1)
-    # soft = m(preds)
+    m = nn.Softmax(dim=1)
+    soft = m(preds)
     batch_size = int(preds.shape[0]/2)
     # print(batch_size)
-    preds1, preds2 = preds[:batch_size], preds[batch_size:]
-    labels1, labels2 = labels[:batch_size], labels[batch_size:]
-    # soft1, soft2 = soft[:batch_size], soft[batch_size:]
-    # print((torch.norm(preds1-preds2, dim=1)).shape)
-    # print(labels1.shape)
-    # try:
-    loss1 = (labels1==labels2)*(torch.norm(preds1-preds2, dim=1))
-    loss2 = torch.max((labels1!=labels2)*(1-torch.norm(preds1-preds2, dim=1)), torch.zeros(batch_size))
-    return torch.mean(loss1+loss2)
-    # except:
-    #     print('why')
-    #     return 0
+    preds1, preds2 = preds[:batch_size], preds[batch_size:batch_size*2]
+    labels1, labels2 = labels[:batch_size], labels[batch_size:batch_size*2]
+    soft1, soft2 = soft[:batch_size], soft[batch_size:batch_size*2]
+    p1 = 1-soft1[:,labels1]
+    p2 = 1-soft2[:,labels2]
+    p = 1+(p1+p2)/2
+    loss1 = (labels1==labels2)*(p*torch.norm(preds1-preds2, dim=1))
+    loss2 = (labels1!=labels2)*(torch.log(p*torch.exp(1-torch.norm(preds1-preds2, dim=1))))
+    return torch.mean(torch.square(torch.max(loss1,loss2)))
 
-def train1(training_dataloader, validation_dataloader, nmodel, epochs = 4, lr1=2e-5, lr2=1e-4, alpha = 0.25):
+
+def train1(training_dataloader, validation_dataloader, nmodel, epochs = 4, lr1=2e-5, lr2=1e-4, alpha = 0.25, beta = 1.0):
     total_steps = len(training_dataloader) * epochs
     bert_params = nmodel.embeddings
     bert_named_params = ['embeddings.'+name_ for name_, param_ in bert_params.named_parameters()]
@@ -75,7 +73,7 @@ def train1(training_dataloader, validation_dataloader, nmodel, epochs = 4, lr1=2
             b_labels = batch[4].to(device).long()
             ypred = nmodel(b_input_ids, b_features, b_input_mask, b_tokens)
             # t = metric_loss(ypred, b_labels)
-            loss = alpha*metric_loss(ypred, b_labels) + (1-alpha)*criterion(ypred, b_labels)
+            loss = beta*(alpha*metric_loss(ypred, b_labels) + (1-alpha)*criterion(ypred, b_labels))
             if step%50==0:
                 print('Loss = '+str(total_train_loss/(step+1.00)))
             total_train_loss += loss
