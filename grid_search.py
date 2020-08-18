@@ -6,7 +6,7 @@ hidden_sizes = [22, 50, 100, 200]
 alpha = [0.1, 0.3, 0.5, 0.7, 0.9]
 beta = [1.0, 2.0, 5.0, 10.0]
 # learning_rates = [1e-3, 1e-4, 2e-5]
-files = ['Datasets/SARCASM.pkl']
+files = ['Datasets/HUMOUR.pkl']
 
 for fil in files:
     f = open(fil.replace('pkl', 'csv'), 'w')
